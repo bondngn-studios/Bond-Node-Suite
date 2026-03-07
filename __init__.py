@@ -6,7 +6,8 @@ from .bond_nodes import (
     CartesianIndexDriverImgPrmpt, 
     LoadImageFromPath, 
     RangeStepper,
-    PromptJSONSelector
+    PromptJSONSelector,
+    BondBatchImageLoader,          # <-- add this
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -17,7 +18,8 @@ NODE_CLASS_MAPPINGS = {
     "CartesianIndexDriverImgPrmpt": CartesianIndexDriverImgPrmpt,
     "LoadImageFromPath": LoadImageFromPath,
     "RangeStepper": RangeStepper,
-    "PromptJSONSelector": PromptJSONSelector
+    "PromptJSONSelector": PromptJSONSelector,
+    "BondBatchImageLoader": BondBatchImageLoader,          # <-- add this
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -28,7 +30,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CartesianIndexDriverImgPrmpt": "Bond: Cartesian Index Driver (Img + Prompt)",
     "LoadImageFromPath": "Bond: Load Image From Path",
     "RangeStepper": "Bond: Range Stepper",
-    "PromptJSONSelector": "Bond: Prompt JSON/TXT Selector"
+    "PromptJSONSelector": "Bond: Prompt JSON/TXT Selector",
+    "BondBatchImageLoader": "Bond: Batch Image Loader",    # <-- add this
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
