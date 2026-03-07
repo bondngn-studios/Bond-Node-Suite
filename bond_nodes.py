@@ -237,3 +237,90 @@ class RangeStepper:
         out_i = max(start, min(cur, stop))
         self._state[key] = min(out_i + step, stop)
         return (out_i,)
+    
+class BondBatchImageLoader:
+    """
+    Loads one image per execution from a directory.
+    Modes: single_image (by index), sequential (auto-advances), random (seed-driven)
+    """
+
+    SUPPORTED_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"}
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mode":                    (["single_image", "sequential", "random"],),
+                "seed":                    ("INT",     {"default": 0, "min": 0, "max": 0x7FFFFFFF}),
+                "index":                   ("INT",     {"default": 0, "min": 0, "max": 100_000}),
+                "path":                    ("STRING",  {"default": ""}),
+                "pattern":                 ("STRING",  {"default": "*"}),
+                "allow_RGBA_output":       ("BOOLEAN", {"default": False}),
+                "filename_text_extension": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    RETURN_TYPES   = ("IMAGE", "STRING", "INT", "INT")
+    RETURN_NAMES   = ("image", "filename_text", "index", "total")
+    FUNCTION       = "load"
+    CATEGORY       = CAT
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+
+    def _scan_dir(self, path, pattern):
+        import fnmatch
+        ap = _abs(path)
+        if not os.path.isdir(ap):
+            raise ValueError(f"Directory not found: {ap}")
+        files = sorted([
+            os.path.join(ap, f)
+            for f in os.listdir(ap)
+            if os.path.splitext(f)[1].lower() in self.SUPPORTED_EXT
+            and fnmatch.fnmatch(f, pattern if pattern.strip() else "*")
+        ])
+        if not files:
+            raise ValueError(f"No supported images found in: {ap}")
+        return files
+
+    def _open(self, path, allow_rgba):
+        img = Image.open(path)
+        if allow_rgba:
+            img = img.convert("RGBA")
+            arr = np.array(img).astype(np.float32) / 255.0
+        else:
+            arr = np.array(img.convert("RGB")).astype(np.float32) / 255.0
+        return torch.from_numpy(arr)[None, ...]  # (1, H, W, C)
+
+    def _filename(self, path, with_ext):
+        base = os.path.basename(path)
+        return base if with_ext else os.path.splitext(base)[0]
+
+    def load(self, mode, seed, index, path, pattern,
+             allow_RGBA_output, filename_text_extension,
+             control_after_generate="fixed"):
+
+        files = self._scan_dir(path, pattern)
+        n     = len(files)
+
+        if mode == "single_image":
+            i = index % n
+
+        elif mode == "sequential":
+            key = _abs(path)
+            with _STATE_LOCK:
+                st = _STATE.get(f"batchloader:{key}")
+                if st is None:
+                    _STATE[f"batchloader:{key}"] = {"idx": 0}
+                st = _STATE[f"batchloader:{key}"]
+                i        = st["idx"]
+                st["idx"] = (i + 1) % n
+
+        elif mode == "random":
+            rng = np.random.default_rng(seed)
+            i   = int(rng.integers(0, n))
+
+        tensor = self._open(files[i], allow_RGBA_output)
+        fname  = self._filename(files[i], filename_text_extension)
+        return (tensor, fname, i, n)
