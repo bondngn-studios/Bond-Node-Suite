@@ -1,36 +1,40 @@
 # Bond Node Suite for ComfyUI
 
-A collection of high-utility custom nodes for ComfyUI focused on batch processing, complex indexing, and iterator logic. Designed to make large-scale generations and multi-variable testing (Subjects, Outfits, Backgrounds) much easier to manage.
+A collection of high-utility custom nodes for ComfyUI focused on batch processing, complex indexing, and iterator logic.
 
 ## 🛠 Nodes Included
-
-All nodes are located under the category: `Bond ➔ Batch ➔ Utilities`
+All nodes are under: `Bond ➔ Batch ➔ Utilities`
 
 ### 1. Cartesian Index Drivers
-Available in two flavors (**Image Only** and **Image + Prompt**). These nodes take a master counter (like a Frame Index or Range Stepper) and map it to a multi-dimensional grid. Perfect for "running every outfit against every background" automatically.
+Available in **Image Only** and **Image + Prompt**. Map a master counter to a multi-dimensional grid. Perfect for "running every outfit against every background."
 
-### 2. Bond Prompt Array Iterator
-A thread-safe node that reads a JSON array of strings and iterates through them. 
-- **Features:** Advance on execution, auto-looping, and a built-in seed generator that stays synced with the current index.
+### 2. Prompt JSON/TXT Selector (NEW)
+Specifically designed to work with the Cartesian `idxP` output.
+- **Modes:** Auto-detects between JSON arrays (`["p1", "p2"]`) or TXT files (one prompt per line).
+- **Control:** Choose to "wrap" (start over) or "clamp" (stay on the last prompt) when the index exceeds the list size.
+- **Reference:** Check the `sample_prompts.json` included in this repo for the correct formatting.
 
-### 3. Range Stepper
-A stateful counter that increments every time the queue runs. Use this to drive the "i" input on the Cartesian Drivers or any index-based node.
+### 3. Bond Prompt Array Iterator
+A thread-safe node for iterating through JSON strings with built-in seed syncing and "advance on execution" logic.
 
-### 4. Batch Pickers (Int & String)
-Allows you to pluck a single value out of a batch or list by index.
-- **Batch → Int Pick**: Useful for dynamic seed or parameter selection.
-- **Batch → String Pick**: Useful for choosing specific prompts or attributes from a list.
+### 4. Range Stepper
+A stateful counter that auto-increments with every queue run.
 
-### 5. Load Image From Path
-A simple but powerful utility to load an image from a direct file path on your hard drive, outputting the image tensor along with its filename and directory metadata.
+### 5. Batch Pickers & Loaders
+- **Batch → Int/String Pick**: Pluck values from batches by index.
+- **Load Image From Path**: Load local images with full metadata output (stem, path, directory).
+
+### 6. Batch Image Loader
+- **Bond: Batch Image Loader**: Allows you to point to a directory and load images.  Select your path and set the number (next to Run) for how many images are in your folder.
 
 ## 🚀 Installation
-
-1. Navigate to your ComfyUI `custom_nodes` folder.
-2. Clone this repository:
-   ```bash
-   git clone [https://github.com/YOUR_USERNAME/Bond-Node-Suite.git](https://github.com/YOUR_USERNAME/Bond-Node-Suite.git)
+1. `cd custom_nodes`
+2. `git clone https://github.com/YOUR_USERNAME/Bond-Node-Suite.git`
+3. Restart ComfyUI.
 
 
 ### Sample Files
 In the repo, I've created a "samplePrompts" folder that will give you a sample file for how the JSON prompt that feeds the Bond Prompt Array Iterator should be formatted.
+
+### YouTube Workflows
+In the repo, I've created a "Bond_Studios_Workflows" folder that contains all of the workflows from my YouTube Videos.
