@@ -36,5 +36,5 @@ A stateful counter that auto-increments with every queue run.
 ### Sample Files
 In the repo, I've created a "samplePrompts" folder that will give you a sample file for how the JSON prompt that feeds the Bond Prompt Array Iterator should be formatted.
 
-### YouTube Workflows
+### YouTube & Community Workflows
 In the repo, I've created a "Bond_Studios_Workflows" folder that contains all of the workflows from my YouTube Videos.
