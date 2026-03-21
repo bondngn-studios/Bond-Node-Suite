@@ -29,7 +29,7 @@ A stateful counter that auto-increments with every queue run.
 
 ## 🚀 Installation
 1. `cd custom_nodes`
-2. `git clone https://github.com/YOUR_USERNAME/Bond-Node-Suite.git`
+2. `git clone https://github.com/bondngn-studios/Bond-Node-Suite/`
 3. Restart ComfyUI.
 
 
