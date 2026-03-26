@@ -47,6 +47,16 @@ Every photo and video file carries hidden data called metadata — the camera ma
 
 > **Note:** Bond metadata nodes are intended for creative, artistic, and educational use — for example, creating portfolio content, film production assets, or social media content where realistic camera provenance adds to the creative work. Users are responsible for how they use this tool.
 
+## Read Metadata
+![Bond Node Suite Overview](images/Read_Metadata.jpg)
+
+## Overwrite Image Metadata
+![Bond Node Suite Overview](images/Change_Image_Metadata.jpg)
+
+## Overwrite Video Metadata
+![Bond Node Suite Overview](images/Change_Video_Metadata.jpg)
+
+
 ---
 ## 🛠 Nodes
 
