@@ -1188,7 +1188,7 @@ class BondSaveWithCustomMetadata:
             "required": {
                 "images":          ("IMAGE",  {"tooltip": "The image tensor to save. Wire from VAE Decode or any image output."}),
                 "source_filepath": ("STRING", {"default": "", "multiline": False, "placeholder": "Wire path from Bond: Load Image or Bond: Load Image From Path", "tooltip": "Path to the original source image. Used to read the before metadata."}),
-                "filename_prefix": ("STRING", {"default": "output/bond/img", "tooltip": "Save path and filename prefix. e.g. 'output/bond/img' saves to output/bond/ named img_[timestamp].png. Use an absolute path like 'E:/photos/shoot' to save outside ComfyUI."}),
+                "filename_prefix": ("STRING", {"default": "", "placeholder": "Leave blank to skip saving", "tooltip": "Save path and filename prefix. e.g. 'bond/img' saves to output/bond/ named img_[timestamp].png. Use an absolute path like 'E:/photos/shoot' to save outside ComfyUI. Leave blank to skip saving entirely."}),
                 "exiftool_path":   ("STRING", {"default": "exiftool", "multiline": False, "placeholder": "exiftool  or  C:\\exiftool\\exiftool.exe", "tooltip": "Path to exiftool. Leave as 'exiftool' if on your PATH, or provide full path e.g. C:\\exiftool\\exiftool.exe"}),
                 **_camera_and_rights_inputs(),
             },
@@ -1204,6 +1204,9 @@ class BondSaveWithCustomMetadata:
         datetime_override, artist, copyright, keywords, description,
         custom_xmp_tags,
     ):
+        if not filename_prefix.strip():
+            return {"ui": {"images": []}, "result": ("", "", "", "", "")}
+
         exiftool_exe    = _resolve_exiftool(exiftool_path)
         effective_preset = camera_preset_override.strip() if camera_preset_override and camera_preset_override.strip() else camera_preset
         preset_tags      = CAMERA_PRESETS.get(effective_preset, CAMERA_PRESETS.get("iPhone 15 Pro", {}))
@@ -1287,7 +1290,7 @@ class BondSaveVideoWithMetadata:
             "required": {
                 "video":           ("VIDEO",  {"tooltip": "Wire directly from Create Video or any VIDEO output."}),
                 "source_filepath": ("STRING", {"default": "", "multiline": False, "placeholder": "Wire path from Bond: Load Video for metadata_before readout.", "tooltip": "Path to the original source video. Used to read metadata before stamping. Wire from Bond: Load Video."}),
-                "filename_prefix": ("STRING", {"default": "output/bond/vid", "tooltip": "Save path and filename prefix. e.g. 'output/bond/vid' saves to output/bond/ named vid_[timestamp].mp4."}),
+                "filename_prefix": ("STRING", {"default": "", "placeholder": "Leave blank to skip saving", "tooltip": "Save path and filename prefix. e.g. 'bond/vid' saves to output/bond/ named vid_[timestamp].mp4. Use an absolute path to save outside ComfyUI. Leave blank to skip saving entirely."}),
                 "exiftool_path":   ("STRING", {"default": "exiftool", "multiline": False, "placeholder": "exiftool  or  C:\\exiftool\\exiftool.exe", "tooltip": "Path to exiftool."}),
                 **_camera_and_rights_inputs(),
             },
@@ -1329,6 +1332,9 @@ class BondSaveVideoWithMetadata:
         datetime_override, artist, copyright, keywords, description,
         custom_xmp_tags,
     ):
+        if not filename_prefix.strip():
+            return {"ui": {}, "result": ("", "", "", "", "")}
+
         exiftool_exe    = _resolve_exiftool(exiftool_path)
         ffmpeg_exe      = self._resolve_ffmpeg()
         effective_preset = camera_preset_override.strip() if camera_preset_override and camera_preset_override.strip() else camera_preset
