@@ -19,6 +19,8 @@ from .bond_nodes import (
     BondStripMetadata,
     BondSaveWithCustomMetadata,
     BondSaveVideoWithMetadata,
+    BondText,
+    BondTextConcatenate,
 )
 
 NODE_CLASS_MAPPINGS = {
@@ -42,6 +44,8 @@ NODE_CLASS_MAPPINGS = {
     "BondGlobalMetadataSettings":   BondGlobalMetadataSettings,
     "BondSaveWithCustomMetadata":   BondSaveWithCustomMetadata,
     "BondSaveVideoWithMetadata":    BondSaveVideoWithMetadata,
+    "BondText":                     BondText,
+    "BondTextConcatenate":          BondTextConcatenate,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -65,6 +69,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BondGlobalMetadataSettings":   "Bond: Global Metadata Settings 🌐",
     "BondSaveWithCustomMetadata":   "Bond: Save Image With Custom Metadata ✨",
     "BondSaveVideoWithMetadata":    "Bond: Save Video With Custom Metadata 🎬",
+    "BondText":                     "Bond: Text 📝",
+    "BondTextConcatenate":          "Bond: Text Concatenate 🔗",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

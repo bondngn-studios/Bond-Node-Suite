@@ -1467,6 +1467,62 @@ class BondGlobalMetadataSettings:
     def run(self, camera_preset, location_city):
         return (camera_preset, location_city)
 
+class BondText:
+    """
+    A simple multiline text input node. Use it to hold prompts, labels,
+    or any string value you want to wire into other nodes.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"default": "", "multiline": True, "tooltip": "Enter any text. Wire the output into any STRING input."}),
+            }
+        }
+    RETURN_TYPES    = ("STRING",)
+    RETURN_NAMES    = ("text",)
+    OUTPUT_TOOLTIPS = ("The text string as entered.",)
+    FUNCTION        = "run"
+    CATEGORY        = CAT_UTIL
+
+    def run(self, text):
+        return (text,)
+
+
+class BondTextConcatenate:
+    """
+    Joins up to four wired text strings together with a configurable delimiter.
+    Empty inputs are skipped so you don't end up with stray separators.
+    clean_whitespace trims leading/trailing whitespace from each part before joining.
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "delimiter":       ("STRING",  {"default": "\\n", "multiline": False, "tooltip": "Separator inserted between non-empty inputs. Use \\n for newline."}),
+                "clean_whitespace":("BOOLEAN", {"default": True, "tooltip": "If true, strips leading/trailing whitespace from each input before joining."}),
+            },
+            "optional": {
+                "text_a": ("STRING", {"forceInput": True, "tooltip": "First string (optional)."}),
+                "text_b": ("STRING", {"forceInput": True, "tooltip": "Second string (optional)."}),
+                "text_c": ("STRING", {"forceInput": True, "tooltip": "Third string (optional)."}),
+                "text_d": ("STRING", {"forceInput": True, "tooltip": "Fourth string (optional)."}),
+            }
+        }
+    RETURN_TYPES    = ("STRING",)
+    RETURN_NAMES    = ("text",)
+    OUTPUT_TOOLTIPS = ("All non-empty inputs joined by the delimiter.",)
+    FUNCTION        = "run"
+    CATEGORY        = CAT_UTIL
+
+    def run(self, delimiter, clean_whitespace, text_a="", text_b="", text_c="", text_d=""):
+        delim = delimiter.replace("\\n", "\n").replace("\\t", "\t")
+        parts = [t for t in [text_a, text_b, text_c, text_d] if t]
+        if clean_whitespace:
+            parts = [t.strip() for t in parts if t.strip()]
+        return (delim.join(parts),)
+
+
 # ===========================================================================
 # NODE MAPPINGS
 # ===========================================================================
@@ -1492,6 +1548,8 @@ NODE_CLASS_MAPPINGS = {
     "BondGlobalMetadataSettings":   BondGlobalMetadataSettings,
     "BondSaveWithCustomMetadata":   BondSaveWithCustomMetadata,
     "BondSaveVideoWithMetadata":    BondSaveVideoWithMetadata,
+    "BondText":                     BondText,
+    "BondTextConcatenate":          BondTextConcatenate,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1515,5 +1573,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BondGlobalMetadataSettings":   "Bond: Global Metadata Settings 🌐",
     "BondSaveWithCustomMetadata":   "Bond: Save Image With Custom Metadata ✨",
     "BondSaveVideoWithMetadata":    "Bond: Save Video With Custom Metadata 🎬",
+    "BondText":                     "Bond: Text 📝",
+    "BondTextConcatenate":          "Bond: Text Concatenate 🔗",
 
 }
