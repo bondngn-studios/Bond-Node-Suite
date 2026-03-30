@@ -1217,7 +1217,7 @@ class BondSaveWithCustomMetadata:
         # Step 1 — Read original metadata
         source = source_filepath.strip()
         if source and os.path.isfile(source):
-            metadata_before      = f"📄 BEFORE — {os.path.basename(source)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, source)}"
+            metadata_before      = f"📄 BEFORE — {os.path.basename(source)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, source, filter_common=False)}"
             metadata_json_before = _read_metadata_json(exiftool_exe, source, strip_workflow=False)
         else:
             metadata_before      = "📄 BEFORE\n─────────────────────────────────────\n(no source filepath provided or file not found)"
@@ -1246,7 +1246,7 @@ class BondSaveWithCustomMetadata:
 
         # Step 3 — Read back
         final            = saved_paths[-1]
-        metadata_after      = f"✅ AFTER — {os.path.basename(final)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, final)}"
+        metadata_after      = f"✅ AFTER — {os.path.basename(final)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, final, filter_common=False)}"
         metadata_json_after = _read_metadata_json(exiftool_exe, final, strip_workflow=True)
 
         filepath_out = final if len(saved_paths) == 1 else "\n".join(saved_paths)
@@ -1423,14 +1423,14 @@ class BondSaveVideoWithMetadata:
         ))
 
         # Read back after
-        metadata_after      = f"✅ AFTER — {os.path.basename(filepath)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, filepath)}"
+        metadata_after      = f"✅ AFTER — {os.path.basename(filepath)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, filepath, filter_common=False)}"
         metadata_json_after = _read_metadata_json(exiftool_exe, filepath, strip_workflow=True)
 
         # Read source metadata before stamping if provided
         source = source_filepath.strip() if source_filepath else ""
         _div = "\u2500" * 36
         if source and os.path.isfile(source):
-            _before_sum          = _read_metadata_summary(exiftool_exe, source)
+            _before_sum          = _read_metadata_summary(exiftool_exe, source, filter_common=False)
             metadata_before      = "\U0001f4f9 BEFORE \u2014 " + os.path.basename(source) + "\n" + _div + "\n" + _before_sum
             metadata_json_before = _read_metadata_json(exiftool_exe, source, strip_workflow=False)
         else:
