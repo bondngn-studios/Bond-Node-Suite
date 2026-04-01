@@ -999,7 +999,7 @@ def _split_prefix(filename_prefix: str):
     """
     filename_prefix = filename_prefix.strip()
     directory = os.path.dirname(filename_prefix)
-    prefix    = os.path.basename(filename_prefix) or "bond"
+    prefix    = os.path.basename(filename_prefix)
     out_dir   = directory if os.path.isabs(directory) else os.path.join(folder_paths.get_output_directory(), directory) if directory else folder_paths.get_output_directory()
     return out_dir, prefix
 
@@ -1204,8 +1204,10 @@ class BondSaveWithCustomMetadata:
         datetime_override, artist, copyright, keywords, description,
         custom_xmp_tags,
     ):
-        if not filename_prefix.strip():
-            return {"ui": {"images": []}, "result": ("", "", "", "", "")}
+        if not (filename_prefix or "").strip():
+            msg = "⚠️ Bond: Save Image — no output path set. Please add a value to filename_prefix."
+            print(f"[BondSaveWithCustomMetadata] {msg}")
+            return {"ui": {"images": []}, "result": (msg, "", "", "", "")}
 
         exiftool_exe    = _resolve_exiftool(exiftool_path)
         effective_preset = camera_preset_override.strip() if camera_preset_override and camera_preset_override.strip() else camera_preset
@@ -1332,8 +1334,10 @@ class BondSaveVideoWithMetadata:
         datetime_override, artist, copyright, keywords, description,
         custom_xmp_tags,
     ):
-        if not filename_prefix.strip():
-            return {"ui": {}, "result": ("", "", "", "", "")}
+        if not (filename_prefix or "").strip():
+            msg = "⚠️ Bond: Save Video — no output path set. Please add a value to filename_prefix."
+            print(f"[BondSaveVideoWithMetadata] {msg}")
+            return {"ui": {}, "result": (msg, "", "", "", "")}
 
         exiftool_exe    = _resolve_exiftool(exiftool_path)
         ffmpeg_exe      = self._resolve_ffmpeg()
