@@ -10,6 +10,12 @@ import numpy as np
 from PIL import Image, ImageOps
 import folder_paths
 from comfy_api.latest import io, InputImpl
+try:
+    import torchaudio
+    import torchaudio.transforms as T
+    _TORCHAUDIO_AVAILABLE = True
+except ImportError:
+    _TORCHAUDIO_AVAILABLE = False
 
 # --- Shared Utilities & State ---
 _STATE = {}
@@ -1527,6 +1533,187 @@ class BondTextConcatenate:
         return (delim.join(parts),)
 
 
+class BondSaveTextFile:
+    """
+    Saves a text string to disk with flexible filename control — prefix,
+    delimiter, zero-padded counter, suffix, extension, and encoding all
+    configurable. filename_prefix works like the Bond save image nodes:
+      output/bond/caption  →  saves to output/bond/  named caption_0001.txt
+      E:/captions/run1     →  saves to E:/captions/  named run1_0001.txt
+    Leave path blank to save directly to the ComfyUI output directory.
+    Counter auto-increments per save within the session.
+    """
+
+    _counter      = 0
+    _counter_lock = threading.Lock()
+
+    CATEGORY    = CAT_UTIL
+    FUNCTION    = "save_text"
+    OUTPUT_NODE = True
+    RETURN_TYPES    = ("STRING",)
+    RETURN_NAMES    = ("filepath",)
+    OUTPUT_TOOLTIPS = ("Full path to the saved text file.",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text":                   ("STRING", {"forceInput": True, "tooltip": "The text string to write to disk. Must be wired in."}),
+                "path":                   ("STRING", {"default": "", "multiline": False, "placeholder": "Leave blank for ComfyUI output dir", "tooltip": "Save directory. e.g. 'bond/captions' saves to output/bond/. Use an absolute path like 'E:/captions' to save outside ComfyUI."}),
+                "filename_prefix":        ("STRING", {"default": "text", "multiline": False, "tooltip": "Base name of the file. e.g. 'caption' → caption_0001.txt"}),
+                "filename_delimiter":     ("STRING", {"default": "_", "multiline": False, "tooltip": "Character between prefix, number, and suffix. Default: underscore."}),
+                "filename_number_padding":("INT",    {"default": 4, "min": 0, "max": 9, "tooltip": "Zero-padding width for the auto-increment counter. 0 disables the counter entirely."}),
+                "file_extension":         ("STRING", {"default": ".txt", "multiline": False, "tooltip": "File extension including the dot. e.g. .txt  .md  .csv  .json"}),
+                "encoding":               ("STRING", {"default": "utf-8", "multiline": False, "tooltip": "Text encoding. utf-8 works for almost everything. Use utf-8-sig for Excel-compatible BOM."}),
+                "filename_suffix":        ("STRING", {"default": "", "multiline": False, "tooltip": "Optional suffix appended after the counter. e.g. '_final' → caption_0001_final.txt"}),
+            }
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs): return float("nan")
+
+    def save_text(self, text, path, filename_prefix, filename_delimiter,
+                  filename_number_padding, file_extension, encoding, filename_suffix):
+
+        # Resolve output directory
+        path = path.strip()
+        if path:
+            out_dir = path if os.path.isabs(path) else os.path.join(folder_paths.get_output_directory(), path)
+        else:
+            out_dir = folder_paths.get_output_directory()
+        os.makedirs(out_dir, exist_ok=True)
+
+        # Build filename
+        delim  = filename_delimiter
+        ext    = file_extension if file_extension.startswith(".") else f".{file_extension}"
+        suffix = filename_suffix.strip()
+
+        with BondSaveTextFile._counter_lock:
+            BondSaveTextFile._counter += 1
+            count = BondSaveTextFile._counter
+
+        parts = [filename_prefix.strip() or "text"]
+        if filename_number_padding > 0:
+            parts.append(f"{count:0{filename_number_padding}d}")
+        if suffix:
+            parts.append(suffix)
+
+        filename = delim.join(parts) + ext
+        filepath = os.path.join(out_dir, filename)
+
+        try:
+            with open(filepath, "w", encoding=encoding) as f:
+                f.write(text)
+            print(f"[BondSaveTextFile] Saved: {filepath}")
+        except Exception as e:
+            print(f"[BondSaveTextFile] ERROR: {e}")
+            raise
+
+        return {"ui": {}, "result": (filepath,)}
+
+
+class BondBatchAudioLoader:
+    """
+    Loads one audio file per execution from a folder by index. Designed for
+    batch audio workflows — wire index from a RangeStepper or Cartesian driver
+    to step through a folder of clips one at a time.
+
+    filename (stem only) passes through unchanged so it can wire directly into
+    ComfyUI's native Save Audio node as filename_prefix, preserving the source
+    name through your pipeline. This is critical for workflows where the audio
+    must be reassociated with a matching video clip in a post tool like Premiere.
+
+    target_sample_rate resamples on load if non-zero. Set to 0 to pass through
+    at the file's native rate. RVC nodes commonly expect 40000 or 44100 Hz.
+
+    Requires torchaudio. Will raise a clear error if not installed.
+    """
+
+    SUPPORTED_EXT = {".wav", ".mp3", ".flac", ".ogg", ".aiff", ".aif", ".m4a"}
+
+    CATEGORY    = CAT_BATCH
+    FUNCTION    = "load_audio"
+    RETURN_TYPES    = ("AUDIO", "STRING", "STRING", "INT", "INT")
+    RETURN_NAMES    = ("audio", "filepath", "filename", "index", "count")
+    OUTPUT_TOOLTIPS = (
+        "The loaded audio as a ComfyUI AUDIO dict (waveform tensor + sample_rate). Wire into RVC or any audio node.",
+        "Full absolute path to the loaded audio file.",
+        "Filename stem (no extension). Wire into Save Audio filename_prefix to preserve the source name through your pipeline.",
+        "The index that was used this run. Passthrough for chaining.",
+        "Total number of audio files found in the folder. Wire into RangeStepper stop value to set your queue size.",
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "folder_path":         ("STRING", {"default": "", "multiline": False, "tooltip": "Absolute path to the folder containing your audio clips."}),
+                "index":               ("INT",    {"default": 0, "min": 0, "max": 100_000, "tooltip": "Which file to load. Wire from RangeStepper or a Cartesian driver. Zero-based."}),
+                "file_extension_filter":(["wav", "mp3", "flac", "all"], {"tooltip": "Only load files with this extension. 'all' loads any supported format (.wav .mp3 .flac .ogg .aiff .m4a)."}),
+                "sort_order":          (["alphabetical", "date_modified"], {"tooltip": "alphabetical: consistent ordering by filename. date_modified: oldest first."}),
+                "wrap_index":          (["wrap", "clamp"], {"tooltip": "wrap: loops back to 0 when index exceeds file count. clamp: holds on the last file."}),
+                "target_sample_rate":  ("INT", {"default": 0, "min": 0, "max": 192000, "tooltip": "Resample audio to this rate on load. Set to 0 to use the file's native sample rate. RVC commonly expects 40000 or 44100 Hz."}),
+            }
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs): return float("nan")
+
+    def _scan_folder(self, folder_path, file_extension_filter, sort_order):
+        ap = _abs(folder_path)
+        if not os.path.isdir(ap):
+            raise ValueError(f"[BondBatchAudioLoader] Folder not found: {ap}")
+
+        if file_extension_filter == "all":
+            allowed = self.SUPPORTED_EXT
+        else:
+            allowed = {f".{file_extension_filter}"}
+
+        files = [
+            os.path.join(ap, f) for f in os.listdir(ap)
+            if os.path.isfile(os.path.join(ap, f))
+            and os.path.splitext(f)[1].lower() in allowed
+        ]
+
+        if not files:
+            raise ValueError(f"[BondBatchAudioLoader] No audio files found in: {ap} (filter: {file_extension_filter})")
+
+        if sort_order == "date_modified":
+            files.sort(key=lambda p: os.path.getmtime(p))
+        else:
+            files.sort(key=lambda p: os.path.basename(p).lower())
+
+        return files
+
+    def load_audio(self, folder_path, index, file_extension_filter, sort_order, wrap_index, target_sample_rate):
+        if not _TORCHAUDIO_AVAILABLE:
+            raise RuntimeError(
+                "[BondBatchAudioLoader] torchaudio is not installed. "
+                "Install it with: pip install torchaudio"
+            )
+
+        files = self._scan_folder(folder_path, file_extension_filter, sort_order)
+        n     = len(files)
+        i     = index % n if wrap_index == "wrap" else max(0, min(index, n - 1))
+
+        filepath = files[i]
+        waveform, sample_rate = torchaudio.load(filepath)
+
+        # Resample if requested
+        if target_sample_rate > 0 and sample_rate != target_sample_rate:
+            resampler = T.Resample(orig_freq=sample_rate, new_freq=target_sample_rate)
+            waveform   = resampler(waveform)
+            sample_rate = target_sample_rate
+
+        # ComfyUI AUDIO dict — waveform shape: [channels, samples], unsqueezed to [1, channels, samples]
+        audio = {"waveform": waveform.unsqueeze(0), "sample_rate": sample_rate}
+
+        stem     = os.path.splitext(os.path.basename(filepath))[0]
+        print(f"[BondBatchAudioLoader] Loaded [{i}/{n-1}]: {filepath} | {sample_rate}Hz | shape: {waveform.shape}")
+
+        return (audio, filepath, stem, i, n)
+
+
 # ===========================================================================
 # NODE MAPPINGS
 # ===========================================================================
@@ -1554,6 +1741,8 @@ NODE_CLASS_MAPPINGS = {
     "BondSaveVideoWithMetadata":    BondSaveVideoWithMetadata,
     "BondText":                     BondText,
     "BondTextConcatenate":          BondTextConcatenate,
+    "BondSaveTextFile":             BondSaveTextFile,
+    "BondBatchAudioLoader":         BondBatchAudioLoader,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1579,5 +1768,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BondSaveVideoWithMetadata":    "Bond: Save Video With Custom Metadata 🎬",
     "BondText":                     "Bond: Text 📝",
     "BondTextConcatenate":          "Bond: Text Concatenate 🔗",
+    "BondSaveTextFile":             "Bond: Save Text File 💾",
+    "BondBatchAudioLoader":         "Bond: Batch Audio Loader 🎙️",
 
 }

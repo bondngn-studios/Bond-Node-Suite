@@ -97,21 +97,33 @@ app.registerExtension({
             applyBypassAll();
         });
 
-        // Inject as leftmost item in the top bar button container
+        // Inject into the toolbar — tries multiple selectors in order of stability.
+        // The data-testid scoped selector is most resilient to frontend updates.
         const inject = () => {
-            const container = document.querySelector(".flex.gap-2.mx-2");
-            if (container) {
-                container.insertBefore(btn, container.firstElementChild);
+            const selectors = [
+                "[data-testid='legacy-topbar-container'] .flex.gap-2.mx-2",
+                ".comfyui-button-group",
+                ".flex.gap-2.mx-2",
+                ".actionbar-container",
+            ];
+
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (!el) continue;
+                el.insertBefore(btn, el.firstElementChild);
                 return true;
             }
             return false;
         };
 
-        if (!inject()) {
-            const observer = new MutationObserver(() => {
-                if (inject()) observer.disconnect();
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-        }
+        // Small delay to ensure toolbar is fully rendered before injecting
+        setTimeout(() => {
+            if (!inject()) {
+                const observer = new MutationObserver(() => {
+                    if (inject()) observer.disconnect();
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
+        }, 500);
     },
 });
