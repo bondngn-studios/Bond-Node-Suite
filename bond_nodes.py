@@ -1234,7 +1234,11 @@ class BondSaveWithCustomMetadata:
         # Step 2 — Save PNG and stamp
         saved_paths, ui_images = [], []
         for i, img_tensor in enumerate(images):
+            
+            print(f"[Bond Debug] img_tensor min={img_tensor.min():.4f} max={img_tensor.max():.4f} shape={img_tensor.shape}")
             arr      = (img_tensor.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            if arr.shape[-1] == 4:
+                arr = arr[:, :, :3]  # Drop alpha channel, keep RGB
             ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             suffix   = f"_{i:04d}" if len(images) > 1 else ""
             filename = f"{prefix}_{ts}{suffix}.png"
