@@ -1270,16 +1270,17 @@ class BondSaveWithCustomMetadata:
 
 class BondSaveVideoWithMetadata:
     """
-    Saves a VIDEO object to disk as MP4 and stamps EXIF, XMP, and QuickTime
-    metadata via exiftool. Mirrors Bond: Save With Custom Metadata exactly —
-    same inputs, same 5 outputs, same filename_prefix pattern.
+    Saves a generated video to disk as MP4 and stamps EXIF, XMP, and QuickTime
+    metadata via exiftool.
 
-    Wire Create Video (or any VIDEO output) directly into the video input.
-    The before metadata outputs are reserved for the future Bond: Load Video
-    node and return empty strings for now.
+    Handles two use cases:
+      1. Generated video with no audio — frames encoded to MP4 via ffmpeg.
+      2. Generated video WITH audio (e.g. LTX Video) — frames + audio tensor
+         encoded to MP4 via ffmpeg with the audio stream correctly muxed in.
 
-    Uses ffmpeg to encode frames to MP4. ffmpeg must be on your PATH or set
-    the ffmpeg_path widget to its full path.
+    source_filepath is OPTIONAL. Wire the path output from Bond: Load Video if
+    you want a metadata_before readout. It is not used for saving — the video
+    tensor is always the source of truth for the output file.
 
     Requires exiftool installed and the path set in the exiftool_path widget.
     """
@@ -1300,8 +1301,8 @@ class BondSaveVideoWithMetadata:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "video":           ("VIDEO",  {"tooltip": "Wire directly from Create Video or any VIDEO output."}),
-                "source_filepath": ("STRING", {"default": "", "multiline": False, "placeholder": "Wire path from Bond: Load Video for metadata_before readout.", "tooltip": "Path to the original source video. Used to read metadata before stamping. Wire from Bond: Load Video."}),
+                "video":           ("VIDEO",  {"tooltip": "Wire from any video generation node or Bond: Load Video. Frames and audio are read from this tensor."}),
+                "source_filepath": ("STRING", {"default": "", "multiline": False, "placeholder": "Optional — wire path from Bond: Load Video for metadata_before readout", "tooltip": "Optional. Path to the original source video. Used only to read the before metadata. Does not affect saving."}),
                 "filename_prefix": ("STRING", {"default": "", "placeholder": "Leave blank to skip saving", "tooltip": "Save path and filename prefix. e.g. 'bond/vid' saves to output/bond/ named vid_[timestamp].mp4. Use an absolute path to save outside ComfyUI. Leave blank to skip saving entirely."}),
                 "exiftool_path":   ("STRING", {"default": "exiftool", "multiline": False, "placeholder": "exiftool  or  C:\\exiftool\\exiftool.exe", "tooltip": "Path to exiftool."}),
                 **_camera_and_rights_inputs(),
@@ -1313,27 +1314,19 @@ class BondSaveVideoWithMetadata:
 
     @staticmethod
     def _resolve_ffmpeg() -> str:
-        # 1. Check PATH first (works on all platforms)
         found = shutil.which("ffmpeg")
         if found: return found
-        # 2. imageio_ffmpeg package — bundled with ComfyUI on all platforms
         try:
             import imageio_ffmpeg
             exe = imageio_ffmpeg.get_ffmpeg_exe()
             if exe and os.path.isfile(exe): return exe
         except Exception:
             pass
-        # 3. Common system locations as last resort
-        for c in [
-            "/usr/bin/ffmpeg",
-            "/usr/local/bin/ffmpeg",
-            "/opt/homebrew/bin/ffmpeg",  # Mac Apple Silicon
-        ]:
+        for c in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"]:
             if os.path.isfile(c): return c
         raise RuntimeError(
             "[BondNodes] Cannot find ffmpeg.\n"
-            "Ensure imageio_ffmpeg is installed in your Python environment:\n"
-            "  pip install imageio-ffmpeg\n"
+            "Install imageio-ffmpeg:  pip install imageio-ffmpeg\n"
             "Or install ffmpeg system-wide and add it to your PATH."
         )
 
@@ -1349,36 +1342,77 @@ class BondSaveVideoWithMetadata:
             print(f"[BondSaveVideoWithMetadata] {msg}")
             return {"ui": {}, "result": (msg, "", "", "", "")}
 
-        exiftool_exe    = _resolve_exiftool(exiftool_path)
-        ffmpeg_exe      = self._resolve_ffmpeg()
+        exiftool_exe     = _resolve_exiftool(exiftool_path)
+        ffmpeg_exe       = self._resolve_ffmpeg()
         effective_preset = camera_preset_override.strip() if camera_preset_override and camera_preset_override.strip() else camera_preset
         preset_tags      = CAMERA_PRESETS.get(effective_preset, CAMERA_PRESETS.get("iPhone 15 Pro", {}))
         out_dir, prefix  = _split_prefix(filename_prefix)
         os.makedirs(out_dir, exist_ok=True)
 
-        # Extract components from VIDEO object
-        # VideoComponents has .images (tensor BHWC), .audio, .frame_rate (Fraction)
+        # --- Unpack VIDEO tensor ---
         try:
             components = video.get_components()
+            print(f"[BondSaveVideoWithMetadata] VIDEO unpacked via get_components()")
         except AttributeError:
             components = video
+            print(f"[BondSaveVideoWithMetadata] VIDEO used directly (no get_components)")
 
-        images     = components.images        # tensor: [N, H, W, C] float32 0-1
+        print(f"[BondSaveVideoWithMetadata] components type: {type(components)}")
+        print(f"[BondSaveVideoWithMetadata] components attrs: {[a for a in dir(components) if not a.startswith('_')]}")
+
+        images     = components.images
         audio      = getattr(components, "audio", None)
         frame_rate = float(getattr(components, "frame_rate", 24.0))
+        n_frames   = images.shape[0]
+        h, w       = images.shape[1], images.shape[2]
 
-        # Write frames to a temp directory as PNGs, then encode with ffmpeg
+        print(f"[BondSaveVideoWithMetadata] frames={n_frames} size={w}x{h} fps={frame_rate}")
+        print(f"[BondSaveVideoWithMetadata] audio object: {audio}")
+        if audio is not None:
+            print(f"[BondSaveVideoWithMetadata] audio type: {type(audio)}")
+            # audio is a plain dict: {"waveform": tensor, "sample_rate": int}
+            wf = audio["waveform"] if isinstance(audio, dict) else getattr(audio, "waveform", None)
+            sr = audio["sample_rate"] if isinstance(audio, dict) else getattr(audio, "sample_rate", None)
+            print(f"[BondSaveVideoWithMetadata] audio.waveform shape: {wf.shape if wf is not None else None}")
+            print(f"[BondSaveVideoWithMetadata] audio.sample_rate: {sr}")
+
         ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{prefix}_{ts}.mp4"
         filepath = os.path.join(out_dir, filename)
 
         import tempfile
         with tempfile.TemporaryDirectory() as tmp_dir:
-            # Save frames
-            n_frames = images.shape[0]
+
+            # Write frames as PNGs
             for i in range(n_frames):
                 arr = (images[i].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-                Image.fromarray(arr, mode="RGB").save(os.path.join(tmp_dir, f"frame_{i:06d}.png"))
+                Image.fromarray(arr, mode="RGB").save(
+                    os.path.join(tmp_dir, f"frame_{i:06d}.png")
+                )
+
+            # Write audio to WAV if present
+            audio_path = None
+            if audio is not None:
+                try:
+                    import torchaudio
+                    # audio is a plain dict: {"waveform": tensor, "sample_rate": int}
+                    waveform = audio["waveform"] if isinstance(audio, dict) else audio.waveform
+                    sample_rate = audio["sample_rate"] if isinstance(audio, dict) else audio.sample_rate
+                    print(f"[BondSaveVideoWithMetadata] waveform raw shape: {waveform.shape}, dim: {waveform.dim()}")
+                    if waveform.dim() == 3:
+                        waveform = waveform.squeeze(0)   # [1, C, S] -> [C, S]
+                        print(f"[BondSaveVideoWithMetadata] waveform after squeeze: {waveform.shape}")
+                    audio_path = os.path.join(tmp_dir, "audio.wav")
+                    torchaudio.save(audio_path, waveform.cpu(), sample_rate)
+                    wav_size = os.path.getsize(audio_path)
+                    print(f"[BondSaveVideoWithMetadata] WAV written: {audio_path} ({wav_size} bytes)")
+                except Exception as e:
+                    import traceback
+                    print(f"[BondSaveVideoWithMetadata] Audio FAILED: {e}")
+                    print(traceback.format_exc())
+                    audio_path = None
+            else:
+                print(f"[BondSaveVideoWithMetadata] audio is None — no audio stream will be written")
 
             # Build ffmpeg command
             ffmpeg_cmd = [
@@ -1387,24 +1421,26 @@ class BondSaveVideoWithMetadata:
                 "-i", os.path.join(tmp_dir, "frame_%06d.png"),
             ]
 
-            # Add audio if present
-            audio_tmp = None
-            if audio is not None:
-                try:
-                    import torchaudio
-                    audio_tmp = os.path.join(tmp_dir, "audio.wav")
-                    torchaudio.save(audio_tmp, audio.waveform, audio.sample_rate)
-                    ffmpeg_cmd += ["-i", audio_tmp, "-c:a", "aac", "-shortest"]
-                except Exception as e:
-                    print(f"[BondSaveVideoWithMetadata] Audio skipped: {e}")
-                    audio_tmp = None
+            if audio_path:
+                ffmpeg_cmd += ["-i", audio_path]
 
             ffmpeg_cmd += [
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-crf", "18",
-                filepath,
+                # Map all streams explicitly so audio is never silently dropped
+                "-map", "0:v",
             ]
+
+            if audio_path:
+                ffmpeg_cmd += [
+                    "-map", "1:a",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                ]
+
+            ffmpeg_cmd.append(filepath)
 
             result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
             if result.returncode != 0:
@@ -1412,7 +1448,7 @@ class BondSaveVideoWithMetadata:
 
         print(f"[BondSaveVideoWithMetadata] Saved: {filepath}")
 
-        # Stamp device/rights metadata (stills-only tags suppressed via is_video=True)
+        # --- Stamp metadata ---
         _run_exiftool(_common_exiftool_args(
             exiftool_exe, filepath, preset_tags,
             override_make, override_model, override_lens,
@@ -1420,35 +1456,35 @@ class BondSaveVideoWithMetadata:
             keywords, custom_xmp_tags, is_video=True,
         ))
 
-        # Stamp video-specific metadata (fps, duration, codec, audio)
-        h, w = images.shape[1], images.shape[2]
-        audio_sr  = getattr(audio, "sample_rate",  None) if audio is not None else None
-        audio_ch  = getattr(audio, "waveform",     None)
-        audio_ch  = audio_ch.shape[0] if audio_ch is not None else None
         _dt = datetime_override.strip() or datetime.datetime.now().strftime("%Y:%m:%d %H:%M:%S")
+        audio_sr = (audio["sample_rate"] if isinstance(audio, dict) else getattr(audio, "sample_rate", None)) if audio is not None else None
+        audio_ch = None
+        if audio is not None:
+            wf = audio["waveform"] if isinstance(audio, dict) else getattr(audio, "waveform", None)
+            if wf is not None:
+                audio_ch = wf.squeeze(0).shape[0] if wf.dim() == 3 else wf.shape[0]
         _run_exiftool(_video_exiftool_args(
             exiftool_exe, filepath,
             n_frames=n_frames, frame_rate=frame_rate,
             width=w, height=h,
-            has_audio=(audio is not None),
+            has_audio=(audio_path is not None),
             dt=_dt,
             audio_sample_rate=audio_sr,
             audio_channels=audio_ch,
         ))
 
-        # Read back after
-        metadata_after      = f"✅ AFTER — {os.path.basename(filepath)}\n{'─' * 36}\n{_read_metadata_summary(exiftool_exe, filepath, filter_common=False)}"
+        # --- Read back after ---
+        _div = "\u2500" * 36
+        metadata_after      = f"✅ AFTER \u2014 {os.path.basename(filepath)}\n{_div}\n{_read_metadata_summary(exiftool_exe, filepath, filter_common=False)}"
         metadata_json_after = _read_metadata_json(exiftool_exe, filepath, strip_workflow=True)
 
-        # Read source metadata before stamping if provided
-        source = source_filepath.strip() if source_filepath else ""
-        _div = "\u2500" * 36
+        # --- Optional before readout from source_filepath ---
+        source = (source_filepath or "").strip()
         if source and os.path.isfile(source):
-            _before_sum          = _read_metadata_summary(exiftool_exe, source, filter_common=False)
-            metadata_before      = "\U0001f4f9 BEFORE \u2014 " + os.path.basename(source) + "\n" + _div + "\n" + _before_sum
+            metadata_before      = f"\U0001f4f9 BEFORE \u2014 {os.path.basename(source)}\n{_div}\n{_read_metadata_summary(exiftool_exe, source, filter_common=False)}"
             metadata_json_before = _read_metadata_json(exiftool_exe, source, strip_workflow=False)
         else:
-            metadata_before      = "\U0001f4f9 BEFORE\n" + _div + "\n(no source filepath provided or file not found)"
+            metadata_before      = f"\U0001f4f9 BEFORE\n{_div}\n(no source filepath provided)"
             metadata_json_before = "{}"
 
         return {"ui": {}, "result": (filepath, metadata_before, metadata_after, metadata_json_before, metadata_json_after)}
