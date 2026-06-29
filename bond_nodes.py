@@ -346,6 +346,11 @@ class BondSwitch2to1:
     When select is A, input_a passes through.
     When select is B, input_b passes through.
 
+    Inputs are optional — if the upstream node feeding the branch you are
+    NOT selecting is bypassed or left unconnected, this node still runs.
+    The selected branch should be connected and active; the other can be
+    bypassed freely without breaking the graph.
+
     Use case: toggle between two prompts, two models, two branches, or
     any two values in your workflow without rewiring.
     """
@@ -353,9 +358,11 @@ class BondSwitch2to1:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "input_a": ("*",          {"tooltip": "The value to pass through when select is A."}),
-                "input_b": ("*",          {"tooltip": "The value to pass through when select is B."}),
-                "select":  (["A", "B"],   {"default": "A", "tooltip": "A = pass input_a through. B = pass input_b through."}),
+                "select":  (["A", "B"], {"default": "A", "tooltip": "A = pass input_a through. B = pass input_b through."}),
+            },
+            "optional": {
+                "input_a": ("*", {"tooltip": "The value to pass through when select is A. Safe to leave unconnected or bypassed when B is selected."}),
+                "input_b": ("*", {"tooltip": "The value to pass through when select is B. Safe to leave unconnected or bypassed when A is selected."}),
             }
         }
     RETURN_TYPES    = ("*",)
@@ -367,7 +374,7 @@ class BondSwitch2to1:
     @classmethod
     def IS_CHANGED(cls, **kwargs): return float("nan")
 
-    def switch(self, input_a, input_b, select):
+    def switch(self, select, input_a=None, input_b=None):
         return (input_b if select == "B" else input_a,)
 
 
