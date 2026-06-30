@@ -90,6 +90,15 @@ Pluck a single value from a batch by index.
 
 ### Bond/Utilities
 
+#### Bond: Resolution 📐
+Pick from a list of common image and video resolutions — with the aspect ratio shown right in the dropdown — or choose `Custom` to define your own width and height. Outputs `width` and `height` as INT for wiring straight into Empty Latent Image, samplers, or any size input, plus an `aspect_ratio` string you can route into a filename or metadata field (or just ignore).
+
+- **Presets:** Square (512/768/1024), SDXL buckets (1152×896, 1216×832, 1344×768, 1536×640 and their portrait pairs), and standard video sizes (1280×720, 1920×1080, 1024×576 and portrait variants).
+- **`orientation`** — `as_listed` uses the preset as shown; `landscape` forces wide; `portrait` forces tall. Flips any preset without hunting for its mirror entry — handy when bouncing between vertical social content and landscape.
+- **`round_to_multiple_of`** — Snaps the final dimensions *down* to a safe multiple: `8` for SD/SDXL latents, `32` for LTX video, `1` to disable. The presets are already clean multiples, so this mainly guards `Custom` values where an odd number can throw a latent-size error.
+
+> The aspect ratios shown for SDXL buckets are the friendly nominal labels users expect (e.g. 1216×832 is listed as `3:2`, though it's really closer to 19:13). Custom values compute a true reduced ratio.
+
 #### Bond: Load Image 🖼️
 Upload-based image loader with a **choose file to upload** button and image preview — just like the native ComfyUI Load Image node. Outputs `image`, `path`, `stem`, and `dir` for use with metadata nodes.
 
