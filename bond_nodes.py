@@ -1762,6 +1762,123 @@ class BondBatchAudioLoader:
 
 
 # ===========================================================================
+# RESOLUTION PICKER
+# ===========================================================================
+
+# Each entry: (width, height, nominal_ratio) as displayed ("as listed" orientation).
+# Nominal ratios are the friendly, user-expected labels — note several SDXL
+# buckets are only approximately these (e.g. 1216×832 is really ~19:13, shown as 3:2).
+BOND_RESOLUTIONS = [
+    # Square
+    (512,  512,  "1:1"),
+    (768,  768,  "1:1"),
+    (1024, 1024, "1:1"),
+    # SDXL / image — landscape & portrait pairs
+    (1152, 896,  "4:3"),
+    (896,  1152, "3:4"),
+    (1216, 832,  "3:2"),
+    (832,  1216, "2:3"),
+    (1344, 768,  "16:9"),
+    (768,  1344, "9:16"),
+    (1536, 640,  "21:9"),
+    (640,  1536, "9:21"),
+    # Video / standard
+    (1280, 720,  "16:9"),
+    (720,  1280, "9:16"),
+    (1920, 1080, "16:9"),
+    (1080, 1920, "9:16"),
+    (1024, 576,  "16:9"),
+    (576,  1024, "9:16"),
+]
+
+def _bond_res_label(w, h, r):
+    return f"{w} × {h}   ({r})"
+
+_BOND_RES_MAP    = {_bond_res_label(w, h, r): (w, h, r) for (w, h, r) in BOND_RESOLUTIONS}
+_BOND_RES_LABELS = list(_BOND_RES_MAP.keys()) + ["Custom"]
+
+def _bond_reduce_ratio(w, h):
+    from math import gcd
+    if w <= 0 or h <= 0: return "—"
+    g = gcd(w, h)
+    return f"{w // g}:{h // g}"
+
+def _bond_swap_ratio(r):
+    if ":" in r:
+        a, b = r.split(":", 1)
+        return f"{b}:{a}"
+    return r
+
+
+class BondResolution:
+    """
+    Pick from a list of common image/video resolutions (with aspect ratio shown
+    in the list) or define your own width and height. Outputs width and height
+    as INT for wiring into Empty Latent, samplers, or any size input, plus an
+    aspect_ratio string you can ignore or route into a filename/metadata field.
+
+    orientation flips any preset between landscape and portrait without picking
+    a different entry. round_to_multiple_of snaps the final dimensions down to a
+    safe multiple (8 for SD/SDXL latents, 32 for LTX video).
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "resolution":           (_BOND_RES_LABELS, {"default": _bond_res_label(1024, 1024, "1:1"), "tooltip": "Pick a common resolution (aspect ratio shown on the right) or choose Custom to use the width/height fields below."}),
+                "orientation":          (["as_listed", "landscape", "portrait"], {"default": "as_listed", "tooltip": "as_listed: use the preset as shown. landscape: force wide (w ≥ h). portrait: force tall (h ≥ w). Flips a preset without picking a different entry."}),
+                "custom_width":         ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8, "tooltip": "Used only when resolution is Custom."}),
+                "custom_height":        ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8, "tooltip": "Used only when resolution is Custom."}),
+                "round_to_multiple_of": (["1", "8", "16", "32", "64"], {"default": "8", "tooltip": "Snap final width/height DOWN to a multiple of this. 8 is safe for SD/SDXL, 32 suits LTX video, 1 disables snapping. Presets are already clean multiples, so this mainly affects Custom values."}),
+            }
+        }
+
+    RETURN_TYPES    = ("INT", "INT", "STRING")
+    RETURN_NAMES    = ("width", "height", "aspect_ratio")
+    OUTPUT_TOOLTIPS = (
+        "Final width. Wire into Empty Latent Image width or any size input.",
+        "Final height. Wire into Empty Latent Image height or any size input.",
+        "Aspect ratio label, e.g. '16:9'. Optional — wire into a filename or metadata field, or leave unconnected.",
+    )
+    FUNCTION = "run"
+    CATEGORY = CAT_UTIL
+
+    def run(self, resolution, orientation, custom_width, custom_height, round_to_multiple_of):
+        if resolution == "Custom":
+            w, h, nominal = int(custom_width), int(custom_height), None
+        else:
+            w, h, nominal = _BOND_RES_MAP[resolution]
+
+        # Force orientation if requested
+        if orientation == "landscape":
+            target = (max(w, h), min(w, h))
+        elif orientation == "portrait":
+            target = (min(w, h), max(w, h))
+        else:
+            target = (w, h)
+        swapped = target != (w, h)
+        w, h = target
+
+        # Snap down to a safe multiple
+        m = int(round_to_multiple_of)
+        if m > 1:
+            w = max(m, (w // m) * m)
+            h = max(m, (h // m) * m)
+
+        # Resolve aspect ratio label
+        if nominal is None:
+            ratio = _bond_reduce_ratio(w, h)
+        elif w == h:
+            ratio = "1:1"
+        else:
+            ratio = _bond_swap_ratio(nominal) if swapped else nominal
+
+        return (w, h, ratio)
+
+
+
+
+# ===========================================================================
 # NODE MAPPINGS
 # ===========================================================================
 
@@ -1790,6 +1907,7 @@ NODE_CLASS_MAPPINGS = {
     "BondTextConcatenate":          BondTextConcatenate,
     "BondSaveTextFile":             BondSaveTextFile,
     "BondBatchAudioLoader":         BondBatchAudioLoader,
+    "BondResolution":               BondResolution,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1817,5 +1935,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BondTextConcatenate":          "Bond: Text Concatenate 🔗",
     "BondSaveTextFile":             "Bond: Save Text File 💾",
     "BondBatchAudioLoader":         "Bond: Batch Audio Loader 🎙️",
-
+    "BondResolution":               "Bond: Resolution 📐",
 }
