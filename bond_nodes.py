@@ -1878,6 +1878,41 @@ class BondResolution:
 
 
 
+class BondBigNumber:
+    """
+    Displays a single integer very large inside the node body — ideal for a
+    run counter or any INT you want to read from across the room. The digits
+    auto-fit the node: make the node wider on the canvas and the number scales
+    up to fill it. Requires the Bond JS extension (js/bond_nodes.js) to render.
+
+    Wire any INT output into number_in. The value passes through unchanged on
+    number_out for chaining, and the displayed number persists across page
+    reloads. Set color to any CSS color (hex, rgb/rgba, or a named color);
+    defaults to Bond purple.
+    """
+    CATEGORY     = CAT_UTIL
+    FUNCTION     = "show_number"
+    OUTPUT_NODE  = True
+    RETURN_TYPES    = ("INT",)
+    RETURN_NAMES    = ("number_out",)
+    OUTPUT_TOOLTIPS = ("The input integer passed through unchanged.",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "number_in": ("INT",    {"forceInput": True, "tooltip": "Any INT output. Displayed large inside this node's body and passed through on number_out."}),
+                "color":     ("STRING", {"default": "#9b30ff", "multiline": False, "tooltip": "CSS color for the number — hex (#9b30ff), rgb/rgba(), or a named color. Defaults to Bond purple."}),
+            }
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs): return float("nan")
+
+    def show_number(self, number_in=0, color="#9b30ff"):
+        return {"ui": {"number": [str(number_in)]}, "result": (number_in,)}
+
+
 # ===========================================================================
 # NODE MAPPINGS
 # ===========================================================================
@@ -1908,6 +1943,7 @@ NODE_CLASS_MAPPINGS = {
     "BondSaveTextFile":             BondSaveTextFile,
     "BondBatchAudioLoader":         BondBatchAudioLoader,
     "BondResolution":               BondResolution,
+    "BondBigNumber":                BondBigNumber,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1936,4 +1972,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "BondSaveTextFile":             "Bond: Save Text File 💾",
     "BondBatchAudioLoader":         "Bond: Batch Audio Loader 🎙️",
     "BondResolution":               "Bond: Resolution 📐",
+    "BondBigNumber":                "Bond: Big Number 🔢",
 }

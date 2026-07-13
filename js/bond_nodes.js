@@ -121,3 +121,172 @@ app.registerExtension({
         };
     },
 });
+
+/* ---------------------------------------------------------------------------
+ * Bond: Big Number 🔢 — large auto-fitting integer display
+ * Receives an INT on number_in and renders it huge inside the node body.
+ * The digits auto-fit the widget box: drag the node wider to scale up.
+ * Color reads from the node's `color` widget (defaults to Bond purple) and
+ * updates live without needing a re-run. Displayed value persists on reload.
+ * Registered as its own extension so the ShowText handler above is untouched.
+ * ------------------------------------------------------------------------- */
+app.registerExtension({
+    name: "BondNodeSuite.BigNumber",
+
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== "BondBigNumber") return;
+
+        const BOND_PURPLE = "#9b30ff";
+
+        function removeNumberWidgets(node) {
+            if (!node.widgets) return;
+            for (let i = node.widgets.length - 1; i >= 0; i--) {
+                if (node.widgets[i].name === "__bond_number__") {
+                    node.widgets[i].onRemove?.();
+                    node.widgets.splice(i, 1);
+                }
+            }
+        }
+
+        function currentColor(node) {
+            const w = node.widgets?.find((x) => x.name === "color");
+            const v = (w?.value ?? "").toString().trim();
+            return v || BOND_PURPLE;
+        }
+
+        function applyColor(node) {
+            if (node.__bondNumDiv) node.__bondNumDiv.style.color = currentColor(node);
+        }
+
+        // Measure the text at a fixed reference size, then scale the font
+        // proportionally so it fills the box on the tighter of the two axes.
+        function fitNumber(node) {
+            const wrap = node.__bondNumWrap;
+            const num  = node.__bondNumDiv;
+            if (!wrap || !num) return;
+            const w = wrap.clientWidth;
+            const h = wrap.clientHeight;
+            if (!w || !h) return;
+            num.style.fontSize = "100px";
+            const tw = num.scrollWidth  || 1;
+            const th = num.scrollHeight || 1;
+            let fs = 100 * Math.min(w / tw, h / th) * 0.9;
+            if (!isFinite(fs) || fs < 8) fs = 8;
+            num.style.fontSize = fs + "px";
+        }
+
+        function populate(value) {
+            removeNumberWidgets(this);
+
+            let raw = Array.isArray(value)
+                ? value.flat().find((v) => v !== null && v !== undefined && v !== "")
+                : value;
+            if (raw === null || raw === undefined) raw = "";
+            const text = String(raw);
+
+            const wrap = document.createElement("div");
+            wrap.style.cssText = [
+                "width:100%",
+                "height:100%",
+                "display:flex",
+                "align-items:center",
+                "justify-content:center",
+                "overflow:hidden",
+                "box-sizing:border-box",
+                "padding:4px",
+                "background:var(--comfy-input-bg)",
+                "border:1px solid var(--border-color)",
+                "border-radius:4px",
+            ].join(";");
+
+            const num = document.createElement("div");
+            num.textContent = text;
+            num.style.cssText = [
+                "font-family:'Arial Black',Arial,sans-serif",
+                "font-weight:900",
+                "line-height:1",
+                "white-space:nowrap",
+                "text-align:center",
+                `color:${currentColor(this)}`,
+            ].join(";");
+
+            wrap.appendChild(num);
+            this.__bondNumWrap = wrap;
+            this.__bondNumDiv  = num;
+
+            const node = this;
+            this.addDOMWidget("__bond_number__", "customnumber", wrap, {
+                getValue() { return num.textContent; },
+                setValue(v) {
+                    num.textContent = v ?? "";
+                    requestAnimationFrame(() => fitNumber(node));
+                },
+                serialize: true,
+                hideOnZoom: false,
+                // Height tracks node WIDTH (not height) to avoid a resize
+                // feedback loop — dragging the node wider grows the number.
+                computeSize(width) {
+                    return [width, Math.max(80, Math.round(width * 0.45))];
+                },
+            });
+
+            applyColor(this);
+
+            if (this.__bondRO) this.__bondRO.disconnect();
+            this.__bondRO = new ResizeObserver(() => fitNumber(node));
+            this.__bondRO.observe(wrap);
+
+            requestAnimationFrame(() => {
+                fitNumber(node);
+                app.graph.setDirtyCanvas(true, false);
+            });
+        }
+
+        // Live color updates without a re-run.
+        const onNodeCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            onNodeCreated?.apply(this, arguments);
+            const cw = this.widgets?.find((w) => w.name === "color");
+            if (cw && !cw.__bondHooked) {
+                cw.__bondHooked = true;
+                const orig = cw.callback;
+                const node = this;
+                cw.callback = function () {
+                    const r = orig?.apply(this, arguments);
+                    applyColor(node);
+                    return r;
+                };
+            }
+        };
+
+        // Render on execution.
+        const onExecuted = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function (message) {
+            onExecuted?.apply(this, arguments);
+            populate.call(this, message.number);
+        };
+
+        // Persist displayed number across reloads (same approach as Show Text).
+        const VALUES = Symbol();
+        const configure = nodeType.prototype.configure;
+        nodeType.prototype.configure = function () {
+            this[VALUES] = arguments[0]?.widgets_values;
+            return configure?.apply(this, arguments);
+        };
+
+        const onConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function () {
+            onConfigure?.apply(this, arguments);
+            const wv = this[VALUES];
+            if (!wv?.length) return;
+            // Scan from the end for the last integer-looking value so the
+            // color hex (also a serialized widget) is never shown as the number.
+            let found = "";
+            for (let i = wv.length - 1; i >= 0; i--) {
+                const cand = wv[i] === null || wv[i] === undefined ? "" : String(wv[i]).trim();
+                if (/^-?\d+$/.test(cand)) { found = cand; break; }
+            }
+            if (found) requestAnimationFrame(() => populate.call(this, [found]));
+        };
+    },
+});
