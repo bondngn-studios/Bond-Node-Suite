@@ -125,9 +125,16 @@ app.registerExtension({
 /* ---------------------------------------------------------------------------
  * Bond: Big Number 🔢 — large auto-fitting integer display
  * Receives an INT on number_in and renders it huge inside the node body.
- * The digits auto-fit the widget box: drag the node wider to scale up.
- * Color reads from the node's `color` widget (defaults to Bond purple) and
- * updates live without needing a re-run. Displayed value persists on reload.
+ *
+ * Drawn directly on the canvas (no DOM element, no ResizeObserver): every
+ * frame the digits are measured with ctx.measureText and scaled to fit the
+ * space below the widgets, so the number always fits whatever size the node
+ * is dragged to — width or height — and scales cleanly with canvas zoom.
+ *
+ * The displayed value lives in node.properties (not in widgets_values), so it
+ * can never shift into the `color` widget's slot. The color is validated;
+ * an invalid value falls back to Bond purple, and a corrupted saved color
+ * (e.g. a number written into it by the old version) is reset on load.
  * Registered as its own extension so the ShowText handler above is untouched.
  * ------------------------------------------------------------------------- */
 app.registerExtension({
@@ -136,137 +143,150 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "BondBigNumber") return;
 
-        const BOND_PURPLE = "#9b30ff";
+        const BOND_PURPLE  = "#9b30ff";
+        const PROP_KEY     = "bond_big_number";
+        const WIDGET_NAME  = "__bond_number__";
+        const FONT_FAMILY  = "'Arial Black', Arial, sans-serif";
+        const MIN_BOX_H    = 60;   // minimum display height (canvas units)
+        const DEFAULT_SIZE = [320, 240];
 
-        function removeNumberWidgets(node) {
-            if (!node.widgets) return;
-            for (let i = node.widgets.length - 1; i >= 0; i--) {
-                if (node.widgets[i].name === "__bond_number__") {
-                    node.widgets[i].onRemove?.();
-                    node.widgets.splice(i, 1);
-                }
-            }
+        function isValidColor(v) {
+            if (!v) return false;
+            if (/^-?\d+(\.\d+)?$/.test(v)) return false;   // bare numbers are never colors
+            try { return CSS.supports("color", v); } catch { return false; }
+        }
+
+        function colorWidget(node) {
+            return node.widgets?.find((w) => w.name === "color");
         }
 
         function currentColor(node) {
-            const w = node.widgets?.find((x) => x.name === "color");
-            const v = (w?.value ?? "").toString().trim();
-            return v || BOND_PURPLE;
+            const v = (colorWidget(node)?.value ?? "").toString().trim();
+            return isValidColor(v) ? v : BOND_PURPLE;
         }
 
-        function applyColor(node) {
-            if (node.__bondNumDiv) node.__bondNumDiv.style.color = currentColor(node);
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+            else ctx.rect(x, y, w, h);
         }
 
-        // Measure the text at a fixed reference size, then scale the font
-        // proportionally so it fills the box on the tighter of the two axes.
-        function fitNumber(node) {
-            const wrap = node.__bondNumWrap;
-            const num  = node.__bondNumDiv;
-            if (!wrap || !num) return;
-            const w = wrap.clientWidth;
-            const h = wrap.clientHeight;
-            if (!w || !h) return;
-            num.style.fontSize = "100px";
-            const tw = num.scrollWidth  || 1;
-            const th = num.scrollHeight || 1;
-            let fs = 100 * Math.min(w / tw, h / th) * 0.9;
-            if (!isFinite(fs) || fs < 8) fs = 8;
-            num.style.fontSize = fs + "px";
+        // Fit `text` inside the box (x, y, w, h): measure at 100px, scale to the
+        // tighter axis, then centre on the glyphs' real ink bounds.
+        function drawFittedNumber(ctx, text, x, y, w, h, color) {
+            if (!text || w <= 0 || h <= 0) return;
+            const pad = Math.max(4, Math.min(w, h) * 0.06);
+            const aw  = w - pad * 2;
+            const ah  = h - pad * 2;
+            if (aw <= 0 || ah <= 0) return;
+
+            ctx.textAlign    = "center";
+            ctx.textBaseline = "alphabetic";
+            ctx.font = `900 100px ${FONT_FAMILY}`;
+            const m  = ctx.measureText(text);
+            const tw = Math.max(1, (m.actualBoundingBoxLeft ?? 0) + (m.actualBoundingBoxRight ?? m.width) || m.width);
+            const th = Math.max(1, (m.actualBoundingBoxAscent ?? 72) + (m.actualBoundingBoxDescent ?? 0));
+            let fs = 100 * Math.min(aw / tw, ah / th);
+            if (!isFinite(fs) || fs < 6) fs = 6;
+
+            ctx.font = `900 ${fs}px ${FONT_FAMILY}`;
+            const m2   = ctx.measureText(text);
+            const asc  = m2.actualBoundingBoxAscent  ?? fs * 0.72;
+            const desc = m2.actualBoundingBoxDescent ?? 0;
+            const left = m2.actualBoundingBoxLeft    ?? m2.width / 2;
+            const rght = m2.actualBoundingBoxRight   ?? m2.width / 2;
+
+            ctx.fillStyle    = color;
+            const cx = x + w / 2 + (left - rght) / 2;
+            const cy = y + h / 2 + (asc - desc) / 2;
+            ctx.fillText(text, cx, cy);
         }
 
-        function populate(value) {
-            removeNumberWidgets(this);
-
-            let raw = Array.isArray(value)
-                ? value.flat().find((v) => v !== null && v !== undefined && v !== "")
-                : value;
-            if (raw === null || raw === undefined) raw = "";
-            const text = String(raw);
-
-            const wrap = document.createElement("div");
-            wrap.style.cssText = [
-                "width:100%",
-                "height:100%",
-                "display:flex",
-                "align-items:center",
-                "justify-content:center",
-                "overflow:hidden",
-                "box-sizing:border-box",
-                "padding:4px",
-                "background:var(--comfy-input-bg)",
-                "border:1px solid var(--border-color)",
-                "border-radius:4px",
-            ].join(";");
-
-            const num = document.createElement("div");
-            num.textContent = text;
-            num.style.cssText = [
-                "font-family:'Arial Black',Arial,sans-serif",
-                "font-weight:900",
-                "line-height:1",
-                "white-space:nowrap",
-                "text-align:center",
-                `color:${currentColor(this)}`,
-            ].join(";");
-
-            wrap.appendChild(num);
-            this.__bondNumWrap = wrap;
-            this.__bondNumDiv  = num;
-
-            const node = this;
-            this.addDOMWidget("__bond_number__", "customnumber", wrap, {
-                getValue() { return num.textContent; },
-                setValue(v) {
-                    num.textContent = v ?? "";
-                    requestAnimationFrame(() => fitNumber(node));
-                },
-                serialize: true,
-                hideOnZoom: false,
-                // Height tracks node WIDTH (not height) to avoid a resize
-                // feedback loop — dragging the node wider grows the number.
-                computeSize(width) {
-                    return [width, Math.max(80, Math.round(width * 0.45))];
-                },
-            });
-
-            applyColor(this);
-
-            if (this.__bondRO) this.__bondRO.disconnect();
-            this.__bondRO = new ResizeObserver(() => fitNumber(node));
-            this.__bondRO.observe(wrap);
-
-            requestAnimationFrame(() => {
-                fitNumber(node);
-                app.graph.setDirtyCanvas(true, false);
-            });
+        function setDisplayed(node, text) {
+            const value = text === null || text === undefined ? "" : String(text);
+            node.properties = node.properties || {};
+            node.properties[PROP_KEY] = value;
+            const w = node.widgets?.find((x) => x.name === WIDGET_NAME);
+            if (w) w.value = value;
+            node.setDirtyCanvas?.(true, true);
         }
 
-        // Live color updates without a re-run.
-        const onNodeCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            onNodeCreated?.apply(this, arguments);
-            const cw = this.widgets?.find((w) => w.name === "color");
-            if (cw && !cw.__bondHooked) {
-                cw.__bondHooked = true;
-                const orig = cw.callback;
+        // Expose for local testing only; harmless in ComfyUI.
+        nodeType.__bondDrawFittedNumber = drawFittedNumber;
+
+        nodeType.prototype.onNodeCreated = (function (orig) {
+            return function () {
+                const r = orig?.apply(this, arguments);
                 const node = this;
-                cw.callback = function () {
-                    const r = orig?.apply(this, arguments);
-                    applyColor(node);
-                    return r;
-                };
-            }
-        };
+
+                if (!node.widgets?.some((w) => w.name === WIDGET_NAME)) {
+                    const widget = {
+                        name: WIDGET_NAME,
+                        type: "bond_big_number",
+                        value: "",
+                        serialize: false,                 // never written to widgets_values
+                        options: { serialize: false },    // never sent to the backend prompt
+                        computeSize(width) {
+                            // Fixed minimum; the drawing itself fills all remaining
+                            // node height, so there is no width/height feedback loop.
+                            return [width, MIN_BOX_H];
+                        },
+                        draw(ctx, n, widgetWidth, y) {
+                            const margin = 10;
+                            const x = margin;
+                            const w = widgetWidth - margin * 2;
+                            const top = y + 2;
+                            const h = Math.max(MIN_BOX_H - 4, n.size[1] - top - margin);
+
+                            ctx.save();
+                            roundRect(ctx, x, top, w, h, 6);
+                            ctx.fillStyle   = "rgba(0,0,0,0.25)";
+                            ctx.fill();
+                            ctx.strokeStyle = (typeof LiteGraph !== "undefined" && LiteGraph.WIDGET_OUTLINE_COLOR) || "#555";
+                            ctx.lineWidth   = 1;
+                            ctx.stroke();
+                            ctx.clip();
+                            drawFittedNumber(ctx, this.value, x, top, w, h, currentColor(n));
+                            ctx.restore();
+                        },
+                    };
+                    if (node.addCustomWidget) node.addCustomWidget(widget);
+                    else (node.widgets ||= []).push(widget);
+                }
+
+                node.properties = node.properties || {};
+                if (node.properties[PROP_KEY] === undefined) node.properties[PROP_KEY] = "";
+
+                // Repaint immediately when the color is edited.
+                const cw = colorWidget(node);
+                if (cw && !cw.__bondHooked) {
+                    cw.__bondHooked = true;
+                    const origCb = cw.callback;
+                    cw.callback = function () {
+                        const res = origCb?.apply(this, arguments);
+                        node.setDirtyCanvas?.(true, true);
+                        return res;
+                    };
+                }
+
+                if (node.size[0] < DEFAULT_SIZE[0] || node.size[1] < DEFAULT_SIZE[1]) {
+                    node.setSize?.([Math.max(node.size[0], DEFAULT_SIZE[0]), Math.max(node.size[1], DEFAULT_SIZE[1])]);
+                }
+                return r;
+            };
+        })(nodeType.prototype.onNodeCreated);
 
         // Render on execution.
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             onExecuted?.apply(this, arguments);
-            populate.call(this, message.number);
+            const v = Array.isArray(message?.number)
+                ? message.number.flat().find((x) => x !== null && x !== undefined && x !== "")
+                : message?.number;
+            setDisplayed(this, v);
         };
 
-        // Persist displayed number across reloads (same approach as Show Text).
+        // Keep the raw saved widgets_values for legacy migration.
         const VALUES = Symbol();
         const configure = nodeType.prototype.configure;
         nodeType.prototype.configure = function () {
@@ -276,17 +296,29 @@ app.registerExtension({
 
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
-            onConfigure?.apply(this, arguments);
-            const wv = this[VALUES];
-            if (!wv?.length) return;
-            // Scan from the end for the last integer-looking value so the
-            // color hex (also a serialized widget) is never shown as the number.
-            let found = "";
-            for (let i = wv.length - 1; i >= 0; i--) {
-                const cand = wv[i] === null || wv[i] === undefined ? "" : String(wv[i]).trim();
-                if (/^-?\d+$/.test(cand)) { found = cand; break; }
+            const r = onConfigure?.apply(this, arguments);
+
+            // Self-heal a color slot that holds a number or other junk.
+            const cw = colorWidget(this);
+            if (cw) {
+                const cv = (cw.value ?? "").toString().trim();
+                if (!isValidColor(cv)) cw.value = BOND_PURPLE;
             }
-            if (found) requestAnimationFrame(() => populate.call(this, [found]));
+
+            // Restore the displayed number: properties first (current format),
+            // otherwise migrate from an older save that kept it in widgets_values.
+            let saved = this.properties?.[PROP_KEY];
+            if (!saved) {
+                const wv = this[VALUES];
+                if (Array.isArray(wv)) {
+                    for (let i = wv.length - 1; i >= 0; i--) {
+                        const cand = wv[i] === null || wv[i] === undefined ? "" : String(wv[i]).trim();
+                        if (/^-?\d+$/.test(cand)) { saved = cand; break; }
+                    }
+                }
+            }
+            setDisplayed(this, saved ?? "");
+            return r;
         };
     },
 });
