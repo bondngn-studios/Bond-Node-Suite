@@ -312,6 +312,11 @@ class RangeStepper:
     """
     A stateful counter that auto-increments by step on every queue run.
     State persists between runs. Use reset to return to the start value.
+
+    at_end controls what happens after the counter emits stop:
+      restart (default) - the next run begins again at start, so a new batch
+                          starts fresh without restarting ComfyUI.
+      hold              - keeps returning stop forever (original behavior).
     """
     _state = {}
 
@@ -320,11 +325,14 @@ class RangeStepper:
         return {
             "required": {
                 "start": ("INT",     {"default": 0,     "tooltip": "The value to start from, and the value returned after a reset."}),
-                "stop":  ("INT",     {"default": 0,     "tooltip": "The maximum value. The counter will not exceed this."}),
+                "stop":  ("INT",     {"default": 0,     "tooltip": "The last value emitted (inclusive). For a Cartesian batch, set this to total - 1."}),
                 "step":  ("INT",     {"default": 1,     "tooltip": "How much to increment by on each run."}),
                 "reset": ("BOOLEAN", {"default": False, "tooltip": "Set to true to reset the counter back to start on the next run."}),
             },
-            "optional": {"trigger": ("*", {"tooltip": "Wire any output here to force this node to run after it."})}
+            "optional": {
+                "trigger": ("*", {"tooltip": "Wire any output here to force this node to run after it."}),
+                "at_end":  (["restart", "hold"], {"default": "restart", "tooltip": "restart: after emitting stop, the next run starts again at start. hold: keep returning stop forever."}),
+            }
         }
     RETURN_TYPES    = ("INT",)
     RETURN_NAMES    = ("i",)
@@ -335,11 +343,12 @@ class RangeStepper:
     @classmethod
     def IS_CHANGED(cls, **kwargs): return float("nan")
 
-    def run(self, start, stop, step, reset=False, trigger=None):
+    def run(self, start, stop, step, reset=False, trigger=None, at_end="restart"):
         key   = (start, stop, step)
         cur   = start if reset or key not in self._state else self._state[key]
+        if at_end == "restart" and cur > stop: cur = start   # previous pass finished
         out_i = max(start, min(cur, stop))
-        self._state[key] = min(out_i + step, stop)
+        self._state[key] = out_i + step if at_end == "restart" else min(out_i + step, stop)
         return (out_i,)
 
 
