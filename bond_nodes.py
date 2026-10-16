@@ -23,6 +23,11 @@ _STATE_LOCK = threading.Lock()
 
 def _abs(p): return os.path.abspath(os.path.expanduser(p))
 
+def _clean_path(p):
+    """Trim whitespace and any surrounding quotes, e.g. from Windows 'Copy as path'."""
+    if p is None: return ""
+    return str(p).strip().strip('"\'').strip()
+
 def _pil_to_tensor_rgb(img):
     img = img.convert("RGB")
     arr = np.array(img).astype(np.float32) / 255.0
@@ -68,7 +73,7 @@ class PromptJSONSelector:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "file_path": ("STRING", {"default": "", "tooltip": "Absolute path to a .json or .txt file containing your prompts."}),
+                "file_path": ("STRING", {"default": "", "tooltip": "Absolute path to a .json or .txt file containing your prompts. Quotes from Windows 'Copy as path' are fine."}),
                 "index":     ("INT",    {"default": 0, "min": 0, "tooltip": "Which prompt to return. Wire the idxP output from a Cartesian Index Driver here for batch use."}),
                 "mode":      (["auto", "json_array", "txt_lines"], {"tooltip": "auto: detects format automatically. json_array: expects a JSON array of strings. txt_lines: one prompt per line."}),
                 "delimiter": ("STRING", {"default": "\n", "tooltip": "Delimiter used to split lines in txt_lines mode. Leave as \\n for standard line breaks."}),
@@ -111,7 +116,11 @@ class PromptJSONSelector:
         return lst
 
     def run(self, file_path, index, mode, delimiter, wrap_index):
-        prompts = self._load_list(file_path, mode, delimiter)
+        cleaned = _clean_path(file_path)
+        path = _abs(cleaned) if cleaned else ""
+        if path and not os.path.isfile(path):
+            print(f"[BondNodes] Prompt JSON/TXT Selector: file not found: {path}")
+        prompts = self._load_list(path, mode, delimiter)
         n = len(prompts)
         if n == 0: return ("", 0)
         i = index % n if wrap_index == "wrap" else max(0, min(index, n - 1))
